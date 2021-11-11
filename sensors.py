@@ -1,7 +1,5 @@
-import threading
-
 import RPi.GPIO as GPIO
-import time
+import time, threading
 import os
 import logging
 
@@ -12,22 +10,22 @@ from pubnub.enums import PNStatusCategory, PNOperationType
 from pubnub.pnconfiguration import PNConfiguration
 from pubnub.pubnub import PubNub
 
-PIR_pin = 23
-Buzzer_pin = 24
-
-my_channel = "johns-pi-channel"
-sensor_list = ["buzzer"]
-data = {}
-
 pnconfig = PNConfiguration()
-
 pnconfig.subscribe_key = os.getenv("PUBNUB_SUBSCRIBE")
 pnconfig.publish_key = os.getenv("PUBNUB_PUBLISH")
-pnconfig.uuid = '0b196963-df2f-4996-970a-778ecb0fd41e'
+pnconfig.uuid = '3fa7edb4-3d6e-11ec-8bbf-0242ac130003'
 pubnub = PubNub(pnconfig)
 
+my_channel = 'johns-pi-channel-sd3a'
+sensor_list = ['buzzer']
+data = {}
+
+
+PIR_pin = 16
+Buzzer_pin = 18
+
 GPIO.setwarnings(False)
-GPIO.setmode(GPIO.BCM)
+GPIO.setmode(GPIO.BOARD)
 GPIO.setup(PIR_pin, GPIO.IN)
 GPIO.setup(Buzzer_pin, GPIO.OUT)
 
@@ -43,21 +41,24 @@ def beep(repeat):
 
 
 def motion_detection():
+    global data
     data["alarm"] = False
     trigger = False
     while True:
         if GPIO.input(PIR_pin):
             print("Motion detected")
             beep(4)
+            publish(my_channel, {"motion" : "Yes"})
             trigger = True
-            publish(my_channel, {"motion": "Yes"})
             time.sleep(1)
-        elif trigger:
-            publish(my_channel, {"motion": "No"})
-            trigger = False
 
+        elif trigger:
+            publish(my_channel, {"motion" : "No"})
+            trigger = False
+            print("No motion detected")
         if data["alarm"]:
             beep(2)
+        time.sleep(1)
 
 
 def publish(channel, msg):
@@ -87,7 +88,7 @@ class MySubscribeCallback(SubscribeCallback):
             # Connect event. You can do stuff like publish, and know you'll get it.
             # Or just use the connected event to confirm you are subscribed for
             # UI / internal notifications, etc
-            print("Connected to PubNub")
+            print("Successfully connected to Pubnub")
             pubnub.publish().channel(my_channel).message('Hello world!').pn_async(my_publish_callback)
         elif status.category == PNStatusCategory.PNReconnectedCategory:
             pass
@@ -98,7 +99,6 @@ class MySubscribeCallback(SubscribeCallback):
             # Handle message decryption error. Probably client configured to
             # encrypt messages and on live data feed it received plain text.
 
-
     def message(self, pubnub, message):
         # Handle new message stored in message.message
         try:
@@ -106,31 +106,37 @@ class MySubscribeCallback(SubscribeCallback):
             msg = message.message
             key = list(msg.keys())
             if key[0] == "event":
-                self.handleEvent(msg)
+                self.handle_event(msg)
         except Exception as e:
-            print("Received: ", message.message)
+            print(message.message)
             print(e)
             pass
 
-def handleEvent(self, msg):
-    global data
-    eventData = msg["event"]
-    key = list(eventData.keys())
-    print(key)
-    print(key[0])
-    if key[0] in sensor_list:
-        if eventData[key[0]] is True:
-            print("Setting the alarm")
-            data["alarm"] = True
-        elif eventData[key[0]] is False:
-            print("Turning alarm off")
-            data["alarm"] = False
+
+    def handle_event(self, msg):
+        global data
+        event_data = msg["event"]
+        key = list(event_data.keys())
+        print(key)
+        print(key[0])
+        if key[0] in sensor_list:
+            print(event_data[key[0]])
+            if event_data[key[0]] == "ON":
+                print("Setting alarm")
+                data["alarm"] = True
+            elif event_data[key[0]] == "OFF":
+                print("Turning alarm off")
+                data["alarm"] = False
 
 
-if __name__ == "__main__":
-    sensors_thread = threading.Thread(target=motion_detection)
+if __name__ == '__main__':
+    sensors_thread = threading.Thread(target = motion_detection)
     sensors_thread.start()
     pubnub.add_listener(MySubscribeCallback())
     pubnub.subscribe().channels(my_channel).execute()
-    print(pubnub.get_subscribed_channels())
+
+
+
+
+
 
